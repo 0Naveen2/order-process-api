@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:validation="http://www.mulesoft.org/schema/mule/validation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
+
+    <!-- CREATE ORDER SUBFLOW -->
+
+    <sub-flow name="create-order-subflow"
+              doc:id="f9caf002-81b2-4d7e-afb9-f24c96605148">
+
+        <logger level="INFO"
+                doc:name="Log Start Create Order Subflow"
+                message='#["[PAPI] Executing CREATE order orchestration | Correlation ID: " ++ vars.correlationId]'/>
+
+        <!-- Map Normalized Request Payload for SAPI -->
+
+        <ee:transform doc:name="Build SAPI POST Payload"
+                      doc:id="477fe9a9-f69c-41a4-b7ed-b610fa0a6ccc">
+
+            <ee:message>
+
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere"
+
+var data = payload
+---
+{
+  customerId: data.customerId,
+  customerName: data.customerName,
+  customerEmail: data.customerEmail,
+  orderDate: data.orderDate default (now() as String {format: "yyyy-MM-dd"}),
+  productCode: data.productCode,
+  quantity: data.quantity,
+  currency: data.currency,
+  shippingAddressLine1: data.shippingAddressLine1,
+  shippingAddressLine2: data.shippingAddressLine2,
+  shippingCity: data.shippingCity,
+  shippingState: data.shippingState,
+  shippingPostalCode: data.shippingPostalCode,
+  shippingCountry: data.shippingCountry
+}]]></ee:set-payload>
+
+            </ee:message>
+
+        </ee:transform>
+
+        <set-variable
+            value="#[payload]"
+            doc:name="Set orderPayload Var"
+            doc:id="79c17c83-1664-41c6-8bf6-80cb783d7156"
+            variableName="orderPayload"/>
+
+        <!-- Call SAPI POST /orders -->
+
+        <try doc:name="Try SAPI Create Call">
+
+            <http:request
+                method="POST"
+                doc:name="Call DB SAPI - POST /orders"
+                doc:id="993df660-3f7f-486f-aa81-042833300450"
+                config-ref="DB_SAPI_HTTP_Request_Config"
+                path="/orders"
+                target="sapiResponse">
+
+                <http:headers><![CDATA[#[{
+                    "Content-Type": "application/json",
+                    "X-Correlation-ID": vars.correlationId
+                }]]]></http:headers>
+
+            </http:request>
+
+            <error-handler>
+
+                <on-error-propagate
+                    enableNotifications="true"
+                    logException="true"
+                    doc:name="Propagate SAPI Error">
+
+                    <set-variable
+                        value="#[error.errorMessage.payload default error.description]"
+                        doc:name="Set sapiErrorPayload Var"
+                        variableName="sapiErrorPayload"/>
+
+                    <logger
+                        level="ERROR"
+                        doc:name="Log SAPI POST Error"
+                        message='#["[PAPI] SAPI POST /orders failed | Reason: " ++ (write(vars.sapiErrorPayload, "application/json") default "")]'/>
+
+                    <logger
+                        level="ERROR"
+                        doc:name="Check Error Payload"
+                        message='#["ERROR PAYLOAD = " ++ (write(vars.sapiErrorPayload,"application/json") default "")]'/>
+
+                </on-error-propagate>
+
+            </error-handler>
+
+        </try>
+
+        <!-- Extract SAPI Output Variables -->
+
+        <ee:transform
+            doc:name="Extract SAPI Response Details"
+            doc:id="58ca79d8-5bb7-4be8-8f29-f6340ff4a98a">
+
+            <ee:variables>
+
+                <ee:set-variable variableName="orderId"><![CDATA[
+vars.sapiResponse.orderId default ""
+]]></ee:set-variable>
+
+                <ee:set-variable variableName="calculatedTotal"><![CDATA[
+vars.sapiResponse.orderTotal default 0
+]]></ee:set-variable>
+
+                <ee:set-variable variableName="unitPrice"><![CDATA[
+vars.sapiResponse.unitPrice default 0
+]]></ee:set-variable>
+
+            </ee:variables>
+
+        </ee:transform>
+
+        <logger
+            level="INFO"
+            doc:name="Log DB SAPI POST Success"
+            doc:id="6e79f3de-b65b-47c3-9441-c796622b2893"
+            message='#["[PAPI] Order created successfully in System API | Order ID: " ++ vars.orderId ++ " | Total: " ++ (vars.calculatedTotal as String default "0")]'/>
+
+        <!-- Trigger Email Notification -->
+
+        <flow-ref
+            doc:name="Trigger order-email-subflow"
+            doc:id="5f8e9473-a5c1-4c78-8ce7-999bad06063d"
+            name="order-email-subflow"/>
+
+    </sub-flow>
+
+
+    <!-- UPDATE ORDER SUBFLOW -->
+
+    <sub-flow name="update-order-subflow"
+              doc:id="59b0f2b9-7043-4e33-be30-a19897f1d494">
+
+        <logger
+            level="INFO"
+            doc:name="Log Start Update"
+            message='#["[PAPI] Executing UPDATE order orchestration | Order ID: " ++ (vars.orderId default "") ++ " | Correlation ID: " ++ (vars.correlationId default "")]'/>
+
+        <!-- Strip Queue Metadata so SAPI receives only valid update fields -->
+
+        <ee:transform
+            doc:name="Build SAPI PATCH Payload"
+            doc:id="3af1bf10-4ba1-4ba2-9605-39277835cb55">
+
+            <ee:message>
+
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere"
+---
+payload - "correlationId" - "operation" - "orderId"]]></ee:set-payload>
+
+            </ee:message>
+
+        </ee:transform>
+
+        <set-variable
+            variableName="customerEmail"
+            value="#[payload.customerEmail]"
+            doc:name="Save Customer Email"/>
+
+        <try doc:name="Try SAPI PATCH Call">
+
+            <http:request
+                method="PATCH"
+                doc:name="Call DB SAPI - PATCH /orders/{orderId}"
+                config-ref="DB_SAPI_HTTP_Request_Config"
+                path="#['/orders/' ++ vars.orderId]">
+
+                <http:headers><![CDATA[#[{
+                    "Content-Type": "application/json",
+                    "X-Correlation-ID": vars.correlationId
+                }]]]></http:headers>
+
+            </http:request>
+
+            <logger
+                level="INFO"
+                doc:name="Log SAPI Update Success"
+                message='#["[PAPI] Order " ++ (vars.orderId default "") ++ " updated successfully in DB SAPI."]'/>
+
+            <flow-ref
+                doc:name="Trigger Update Email"
+                name="order-email-subflow"/>
+
+            <error-handler>
+    			<on-error-propagate
+        			enableNotifications="true"
+        			logException="true"
+        			doc:name="On Error Propagate - PATCH SAPI Error">
+        		<set-variable
+            		variableName="sapiErrorPayload"
+            		value="#[error.errorMessage.payload default error.description]"
+            		doc:name="Set vars.sapiErrorPayload"/>
+        		<logger
+            		level="ERROR"
+            		doc:name="Log SAPI PATCH Error"
+            		message='#["[PAPI] SAPI PATCH /orders/" ++ (vars.orderId default "") ++ " failed"]'/>
+    			</on-error-propagate>
+			</error-handler>
+        </try>
+    </sub-flow>
+
+    <!-- DELETE ORDER SUBFLOW -->
+    <sub-flow name="delete-order-subflow"
+              doc:id="8b5a3027-82ab-4633-8f09-6f7faf04d5e3">
+        <logger
+            level="INFO"
+            doc:name="Log Start Delete"
+            message='#["[PAPI] Executing DELETE order orchestration | Order ID: " ++ (vars.orderId default "") ++ " | Correlation ID: " ++ (vars.correlationId default "")]'/>
+        <set-variable
+            variableName="customerEmail"
+            value="#[payload.customerEmail]"
+            doc:name="Save Customer Email"/>
+        <try doc:name="Try SAPI DELETE Call">
+            <http:request
+                method="DELETE"
+                doc:name="Call DB SAPI - DELETE /orders/{orderId}"
+                config-ref="DB_SAPI_HTTP_Request_Config"
+                path="#['/orders/' ++ vars.orderId]">
+                <http:headers><![CDATA[#[{
+                    "X-Correlation-ID": vars.correlationId
+                }]]]></http:headers>
+            </http:request>
+            <logger
+                level="INFO"
+                doc:name="Log SAPI Delete Success"
+                message='#["[PAPI] Order " ++ (vars.orderId default "") ++ " deleted successfully from DB SAPI."]'/>
+            <flow-ref
+                doc:name="Trigger Delete Email"
+                name="order-email-subflow"/>
+            <error-handler>
+                <on-error-propagate
+                    enableNotifications="true"
+                    logException="true"
+                    doc:name="On Error Propagate - DELETE SAPI Error">
+                    <set-variable
+                        value="#[error.muleMessage.typedValue default error.description]"
+                        doc:name="Set vars.sapiErrorPayload"
+                        variableName="sapiErrorPayload"/>
+                    <logger
+                        level="ERROR"
+                        doc:name="Log SAPI DELETE Error"
+                        message='#["[PAPI] SAPI DELETE /orders/" ++ (vars.orderId default "") ++ " failed | Reason: " ++ ((write(vars.sapiErrorPayload, "application/json") as String) default "")]'/>
+                </on-error-propagate>
+            </error-handler>
+        </try>
+    </sub-flow>
+</mule>

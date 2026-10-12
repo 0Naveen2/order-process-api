@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd">
+
+	<error-handler name="global-error-handlerError_Handler" doc:id="cd680bd9-2426-4204-bc54-bb74fc9c8970">
+		
+		<!-- 1. TRANSIENT / SYSTEM / CONNECTIVITY ERRORS -->
+		<!-- Propagate so RabbitMQ listener fails, message is NOT ACKed, and can be retried / redelivered -->
+		<on-error-propagate enableNotifications="true" logException="true" 
+			doc:name="On Error Propagate - System &amp; Transient Errors" 
+			type="HTTP:CONNECTIVITY, HTTP:TIMEOUT, HTTP:SERVICE_UNAVAILABLE, HTTP:TOO_MANY_REQUESTS, AMQP:CONNECTIVITY">
+			<logger level="ERROR" doc:name="Log Transient System Error" 
+				message='#["[PAPI ERROR] System/Transient connectivity failure occurred. Flow will propagate for redelivery | Type: " ++ (error.errorType.namespace default "") ++ ":" ++ (error.errorType.identifier default "") ++ " | Correlation ID: " ++ (vars.correlationId default "")]' />
+		</on-error-propagate>
+
+		<!-- 2. NON-RETRYABLE / BUSINESS / DATA / INVALID OPERATION ERRORS -->
+		<!-- Consume error via on-error-continue, format error context, and route message to DLQ -->
+		<on-error-continue enableNotifications="true" logException="true" 
+			doc:name="On Error Continue - Route Non-Retryable to DLQ" 
+			type="ANY">
+			<logger
+    level="ERROR"
+    doc:name="DEBUG Global Error Handler Entered"
+    message="#[
+        '[PAPI DEBUG] GLOBAL ERROR HANDLER ENTERED | Type: '
+        ++ (error.errorType.namespace default '')
+        ++ ':'
+        ++ (error.errorType.identifier default '')
+        ++ ' | Operation: '
+        ++ (vars.operation default 'UNKNOWN')
+        ++ ' | Correlation ID: '
+        ++ (vars.correlationId default '')
+    ]"/>
+    
+    <flow-ref
+    name="order-failure-email-subflow"
+    doc:name="Send Customer Failure Email"/>
+    
+			<!-- ADD THIS TRANSFORM -->
+    <ee:transform doc:name="Prepare Non-Retryable Error Log">
+    <ee:message>
+        <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+"[PAPI ERROR] Non-retryable failure | Operation: "
+++ ((vars.operation default "UNKNOWN") as String)
+++ " | Correlation ID: "
+++ ((vars.correlationId default "") as String)
+++ " | Error: "
+++ (
+    if (vars.sapiErrorPayload is Object)
+        (
+            vars.sapiErrorPayload.errorMessage
+            default vars.sapiErrorPayload.description
+            default error.description
+            default "Processing failed"
+        )
+    else
+        (vars.sapiErrorPayload as String default error.description default "Processing failed")
+) as String
+]]></ee:set-payload>
+    </ee:message>
+</ee:transform>
+
+    <!-- ADD THIS LOGGER -->
+    <logger
+        level="ERROR"
+        doc:name="Log Non-Retryable Processing Error"
+        message="#[payload]"/>			
+			
+			<!-- Format Enterprise DLQ Payload -->
+			<ee:transform doc:name="Prepare DLQ Audit Payload" doc:id="25b34629-740d-4861-8c97-af2db4b44aaf">
+			<ee:message>
+			<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var sapiErr = if (vars.sapiErrorPayload is Object) vars.sapiErrorPayload else {}
+---
+{
+	correlationId: vars.correlationId default correlationId,
+	operation: vars.operation default "UNKNOWN",
+	orderId: if (!isEmpty(vars.orderId default "")) 
+            vars.orderId 
+          else 
+            (vars.sapiErrorPayload.orderId default null),
+	originalPayload: vars.rawMessage default payload,
+	errorDetails: {
+		errorCode: sapiErr.errorCode default error.errorType.identifier default "BUSINESS_ERROR",
+		errorNamespace: sapiErr.errorNamespace default "APP",
+		description: sapiErr.errorMessage default sapiErr.description default (vars.sapiErrorPayload as String default error.description default "Processing failed"),
+		apiResponseBody: vars.sapiErrorPayload default null,
+		timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"}
+	}
+}]]></ee:set-payload>
+	</ee:message>
+</ee:transform>
+
+			<!-- Safely Publish Error Message to DLQ Queue -->
+			<try doc:name="Try DLQ Publish">
+				<amqp:publish doc:name="Publish Message to DLQ" doc:id="e4b80b98-c332-41dc-a850-04afc6d0f82d" config-ref="AMQP_Config">
+					<amqp:routing-keys>
+						<amqp:routing-key value="${amqp.queue}.dlq" />
+					</amqp:routing-keys>
+					<amqp:message>
+						<amqp:properties correlationId="#[vars.correlationId default correlationId]" />
+					</amqp:message>
+				</amqp:publish>
+				<logger level="INFO" doc:name="Log DLQ Success" 
+					message='#["[PAPI] Successfully published dead-letter payload to DLQ: " ++ (p("amqp.queue") default "") ++ ".dlq | Correlation ID: " ++ (vars.correlationId default "")]'/>
+				<error-handler>
+					<on-error-continue enableNotifications="true" logException="true" doc:name="Catch DLQ Publish Failure">
+						<logger level="ERROR" doc:name="Log Critical DLQ Publish Failure" 
+							message='#["[PAPI CRITICAL] Failed to publish message to DLQ! Check RabbitMQ broker availability. Payload lost: " ++ (write(payload, "application/json") default "")]'/>
+					</on-error-continue>
+				</error-handler>
+			</try>
+		</on-error-continue>
+
+	</error-handler>
+</mule>

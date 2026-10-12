@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:email="http://www.mulesoft.org/schema/mule/email"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd">
+
+	<sub-flow name="order-email-subflow" doc:id="d3163a90-3b40-41c1-89a3-0b9113350656">
+		<try doc:name="Try Scope (Email Isolation)">
+			
+			<!-- Set Email Variables -->
+			<ee:transform doc:name="Set Email Metadata">
+				<ee:variables>
+					<ee:set-variable variableName="emailSubject"><![CDATA[%dw 2.0
+output application/java
+var op = (vars.operation default "CREATE") as String
+var id = (vars.orderId default vars.orderPayload.orderId default "") as String
+---
+op match {
+    case "CREATE" -> "Order Confirmation - #" ++ id
+    case "UPDATE" -> "Order Update - #" ++ id
+    case "DELETE" -> "Order Cancellation - #" ++ id
+    else          -> "Order Notification - #" ++ id
+}]]></ee:set-variable>
+					<ee:set-variable variableName="targetEmail"><![CDATA[%dw 2.0
+output application/java
+---
+(vars.customerEmail default vars.orderPayload.customerEmail default payload.customerEmail default p('email.user')) as String]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+
+			<!-- Load External DataWeave Template -->
+			<ee:transform doc:name="Build Email Content">
+				<ee:message>
+					<ee:set-payload resource="dw/order-email.dwl" />
+				</ee:message>
+			</ee:transform>
+
+			<!-- Send Plain Text Email -->
+			<email:send doc:name="Send Notification Email" 
+				config-ref="Email_SMTP_Config" 
+				fromAddress="${email.user}" 
+				subject="#[vars.emailSubject]">
+				<email:to-addresses>
+					<email:to-address value="#[vars.targetEmail]" />
+				</email:to-addresses>
+				<email:body contentType="text/plain">
+					<email:content><![CDATA[#[payload]]]></email:content>
+				</email:body>
+			</email:send>
+
+			<logger level="INFO" doc:name="Log Email Success" 
+				message='#["[PAPI] " ++ (vars.operation as String default "CREATE") ++ " email notification sent to: " ++ (vars.targetEmail as String default "N/A")]' />
+
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue">
+					<logger level="ERROR" doc:name="Log Email Failure" 
+						message='#["[PAPI] Email send failed for operation " ++ (vars.operation as String default "") ++ " on order: " ++ (vars.orderId as String default "") ++ ". Continuing message flow."]' />
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+    <!-- FAILURE EMAIL SUBFLOW -->
+<sub-flow name="order-failure-email-subflow">
+
+    <set-variable
+        variableName="failureTargetEmail"
+        value="#[vars.customerEmail default vars.orderPayload.customerEmail default null]"
+        doc:name="Set Failure Email Recipient"/>
+
+    <ee:transform doc:name="Set Failure Reason">
+    <ee:variables>
+        <ee:set-variable variableName="failureReason"><![CDATA[
+%dw 2.0
+output application/java
+var sapiError = vars.sapiErrorPayload default null
+---
+if (sapiError is Object)
+    (
+        sapiError.errorMessage
+        default sapiError.description
+        default error.description
+        default "Order processing failed"
+    ) as String
+else
+    (
+        sapiError as String
+        default error.description
+        default "Order processing failed"
+    ) as String
+        ]]></ee:set-variable>
+    </ee:variables>
+</ee:transform>
+
+    <set-variable
+        variableName="failureEmailSubject"
+        value="#['Order Processing Failed - Correlation ID: ' ++ (vars.correlationId default correlationId default 'N/A')]"
+        doc:name="Set Failure Email Subject"/>
+     	
+     	<ee:transform doc:name="Build Failure Email Body">
+    <ee:variables>
+        <ee:set-variable variableName="failureEmailBody"><![CDATA[
+%dw 2.0
+output text/plain
+
+var customerName =
+    (
+        vars.orderPayload.customerName
+        default payload.customerName
+        default "Customer"
+    ) as String
+
+var orderIdValue =
+    (
+        if (!isEmpty((vars.orderId default "") as String))
+            vars.orderId
+        else if (vars.sapiErrorPayload is Object)
+            vars.sapiErrorPayload.orderId default "N/A"
+        else
+            "N/A"
+    ) as String
+
+
+var failureReasonValue =
+    (vars.failureReason default "Order processing failed") as String
+
+var correlationIdValue =
+    (
+        vars.correlationId
+        default correlationId
+        default "N/A"
+    ) as String
+
+---
+"Hello " ++ customerName ++ ",\n\n"
+++ "We could not process your order.\n\n"
+++ "Order ID: " ++ orderIdValue ++ "\n"
+++ "Failure Reason: " ++ failureReasonValue ++ "\n"
+++ "Correlation ID: " ++ correlationIdValue ++ "\n\n"
+++ "Please provide this Correlation ID if you contact support.\n\n"
+++ "Best regards,\n"
+++ "Order Management Team"
+        ]]></ee:set-variable>
+    </ee:variables>
+</ee:transform>
+    <choice doc:name="Check Failure Email Recipient">
+
+    <when expression="#[!isEmpty(vars.failureTargetEmail default '')]">
+
+        <try doc:name="Try Failure Email Send">
+
+            <email:send
+                doc:name="Send Failure Email"
+                config-ref="Email_SMTP_Config"
+                fromAddress="${email.user}"
+                subject="#[vars.failureEmailSubject]">
+
+                <email:to-addresses>
+                    <email:to-address value="#[vars.failureTargetEmail]"/>
+                </email:to-addresses>
+
+                <email:body contentType="text/plain">
+                    <email:content><![CDATA[#[vars.failureEmailBody]]]></email:content>
+                </email:body>
+
+            </email:send>
+
+            <logger
+    			level="INFO"
+    			doc:name="Log Failure Email Success"
+    			message="[PAPI] Customer failure email sent successfully"/>
+
+            <error-handler>
+                <on-error-continue
+                    type="ANY"
+                    enableNotifications="true"
+                    logException="true"
+                    doc:name="Continue if Failure Email Fails">
+
+                    <logger
+                        level="ERROR"
+                        doc:name="Log Failure Email Error"
+                        message='#["[PAPI] Failure email could not be sent"
+                            ++ " | Recipient: " ++ (vars.failureTargetEmail default "N/A")
+                            ++ " | Correlation ID: " ++ (vars.correlationId default correlationId default "N/A")
+                            ++ " | Reason: " ++ (error.description default "Unknown email error")]'/>
+
+                </on-error-continue>
+            </error-handler>
+
+        </try>
+
+    </when>
+
+    <otherwise>
+
+        <logger
+            level="WARN"
+            doc:name="Skip Failure Email"
+            message='#["[PAPI] Failure email skipped because customer email is unavailable"
+                ++ " | Correlation ID: " ++ (vars.correlationId default correlationId default "N/A")]'/>
+
+    </otherwise>
+
+</choice>
+
+</sub-flow>
+</mule>

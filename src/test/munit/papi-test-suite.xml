@@ -1,0 +1,1129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:email="http://www.mulesoft.org/schema/mule/email"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd 
+        http://www.mulesoft.org/schema/mule/munit
+        http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools
+        http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/core
+        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http
+        http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/email
+        http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd">
+
+    <munit:config name="order-process-api-test-suite"/>
+
+    <!-- TEST CASE 1: Main Flow CREATE Success Path -->
+
+    <munit:test
+        name="order-process-queue-listener-flow-create-success-test"
+        description="Verify CREATE command executes main flow, create-order-subflow, email subflow, and completes successfully">
+
+        <munit:behavior>
+
+            <munit-tools:mock-when
+                doc:name="Mock DB SAPI POST Request"
+                processor="http:request">
+
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute
+                        attributeName="doc:name"
+                        whereValue="#['Call DB SAPI - POST /orders']"/>
+                </munit-tools:with-attributes>
+
+                <munit-tools:then-return>
+
+    <munit-tools:payload
+        value='#[{
+            orderId: "ORD-MUNIT-001",
+            orderTotal: 100,
+            unitPrice: 50
+        }]'
+        mediaType="application/java"/>
+
+    <munit-tools:variables>
+        <munit-tools:variable
+            key="sapiResponse"
+            value='#[{
+                orderId: "ORD-MUNIT-001",
+                orderTotal: 100,
+                unitPrice: 50
+            }]'
+            mediaType="application/java"/>
+    </munit-tools:variables>
+
+</munit-tools:then-return>
+
+            </munit-tools:mock-when>
+
+            <munit-tools:mock-when
+                doc:name="Mock Notification Email"
+                processor="email:send">
+
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute
+                        attributeName="doc:name"
+                        whereValue="#['Send Notification Email']"/>
+                </munit-tools:with-attributes>
+
+                <munit-tools:then-return/>
+
+            </munit-tools:mock-when>
+
+        </munit:behavior>
+
+        <munit:execution>
+
+            <munit:set-event doc:name="Set CREATE Queue Message">
+
+    <munit:payload
+        mediaType="application/json"
+        value='#[write({
+            correlationId: "test-corr-001",
+            operation: "CREATE",
+            orderId: "",
+            payload: {
+                customerId: "CUST-001",
+                customerName: "John Doe",
+                customerEmail: "john.doe@example.com",
+                orderDate: "2026-10-11",
+                productCode: "PROD-001",
+                quantity: 2,
+                currency: "USD",
+                shippingAddressLine1: "123 Main Street",
+                shippingAddressLine2: null,
+                shippingCity: "Hyderabad",
+                shippingState: "Telangana",
+                shippingPostalCode: "500019",
+                shippingCountry: "India"
+            }
+        }, "application/json")]'/>
+
+</munit:set-event>
+
+            <flow-ref
+                name="order-process-queue-listener-flow"
+                doc:name="Invoke order-process-queue-listener-flow"/>
+
+        </munit:execution>
+
+        <munit:validation>
+
+            <munit-tools:assert-that
+                doc:name="Assert operation is CREATE"
+                expression="#[vars.operation]"
+                is="#[MunitTools::equalTo('CREATE')]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert correlationId"
+                expression="#[vars.correlationId]"
+                is="#[MunitTools::equalTo('test-corr-001')]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert rawMessage exists"
+                expression="#[vars.rawMessage != null]"
+                is="#[MunitTools::equalTo(true)]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert orderPayload exists"
+                expression="#[vars.orderPayload != null]"
+                is="#[MunitTools::equalTo(true)]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert created orderId"
+                expression="#[vars.orderId]"
+                is="#[MunitTools::equalTo('ORD-MUNIT-001')]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert calculatedTotal"
+                expression="#[vars.calculatedTotal]"
+                is="#[MunitTools::equalTo(100)]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert unitPrice"
+                expression="#[vars.unitPrice]"
+                is="#[MunitTools::equalTo(50)]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert email subject"
+                expression="#[vars.emailSubject]"
+                is="#[MunitTools::equalTo('Order Confirmation - #ORD-MUNIT-001')]"/>
+
+            <munit-tools:assert-that
+                doc:name="Assert target email"
+                expression="#[vars.targetEmail]"
+                is="#[MunitTools::equalTo('john.doe@example.com')]"/>
+
+            <munit-tools:verify-call
+                doc:name="Verify DB SAPI POST called once"
+                processor="http:request"
+                times="1">
+
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute
+                        attributeName="doc:name"
+                        whereValue="#['Call DB SAPI - POST /orders']"/>
+                </munit-tools:with-attributes>
+
+            </munit-tools:verify-call>
+
+            <munit-tools:verify-call
+                doc:name="Verify notification email called once"
+                processor="email:send"
+                times="1">
+
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute
+                        attributeName="doc:name"
+                        whereValue="#['Send Notification Email']"/>
+                </munit-tools:with-attributes>
+
+            </munit-tools:verify-call>
+
+        </munit:validation>
+
+    </munit:test>
+    
+    <!-- TEST CASE 2: Main Flow UPDATE Success Path -->
+
+<munit:test
+    name="order-process-queue-listener-flow-update-success-test"
+    description="Verify UPDATE command executes main flow, update-order-subflow, email subflow, and completes successfully">
+
+    <munit:behavior>
+
+        <munit-tools:mock-when
+            doc:name="Mock DB SAPI PATCH Request"
+            processor="http:request">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - PATCH /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return>
+                <munit-tools:payload
+                    value='#[{
+                        status: "updated",
+                        orderId: "ORD-MUNIT-002"
+                    }]'
+                    mediaType="application/java"/>
+            </munit-tools:then-return>
+
+        </munit-tools:mock-when>
+
+        <munit-tools:mock-when
+            doc:name="Mock UPDATE Notification Email"
+            processor="email:send">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return/>
+
+        </munit-tools:mock-when>
+
+    </munit:behavior>
+
+    <munit:execution>
+
+        <munit:set-event doc:name="Set UPDATE Queue Message">
+
+            <munit:payload
+                mediaType="application/json"
+                value='#[write({
+                    correlationId: "test-corr-002",
+                    operation: "UPDATE",
+                    orderId: "ORD-MUNIT-002",
+                    payload: {
+                        customerId: "CUST-002",
+                        customerName: "Jane Updated",
+                        customerEmail: "jane.updated@example.com",
+                        orderDate: "2026-10-11",
+                        productCode: "PROD-002",
+                        quantity: 5,
+                        currency: "USD",
+                        shippingAddressLine1: "456 Update Street",
+                        shippingAddressLine2: null,
+                        shippingCity: "Hyderabad",
+                        shippingState: "Telangana",
+                        shippingPostalCode: "500019",
+                        shippingCountry: "India"
+                    }
+                }, "application/json")]'/>
+
+        </munit:set-event>
+
+        <flow-ref
+            name="order-process-queue-listener-flow"
+            doc:name="Invoke order-process-queue-listener-flow"/>
+
+    </munit:execution>
+
+    <munit:validation>
+
+        <munit-tools:assert-that
+            doc:name="Assert operation is UPDATE"
+            expression="#[vars.operation]"
+            is="#[MunitTools::equalTo('UPDATE')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert correlationId"
+            expression="#[vars.correlationId]"
+            is="#[MunitTools::equalTo('test-corr-002')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert orderId"
+            expression="#[vars.orderId]"
+            is="#[MunitTools::equalTo('ORD-MUNIT-002')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert rawMessage exists"
+            expression="#[vars.rawMessage != null]"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert customer email saved"
+            expression="#[vars.customerEmail]"
+            is="#[MunitTools::equalTo('jane.updated@example.com')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert UPDATE email subject"
+            expression="#[vars.emailSubject]"
+            is="#[MunitTools::equalTo('Order Update - #ORD-MUNIT-002')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert UPDATE target email"
+            expression="#[vars.targetEmail]"
+            is="#[MunitTools::equalTo('jane.updated@example.com')]"/>
+
+        <munit-tools:verify-call
+            doc:name="Verify DB SAPI PATCH called once"
+            processor="http:request"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - PATCH /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify UPDATE email called once"
+            processor="email:send"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+    </munit:validation>
+
+</munit:test>
+
+
+<!-- TEST CASE 3: Main Flow DELETE Success Path -->
+
+<munit:test
+    name="order-process-queue-listener-flow-delete-success-test"
+    description="Verify DELETE command executes main flow, delete-order-subflow, email subflow, and completes successfully">
+
+    <munit:behavior>
+
+        <munit-tools:mock-when
+            doc:name="Mock DB SAPI DELETE Request"
+            processor="http:request">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - DELETE /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return>
+                <munit-tools:payload
+                    value='#[{
+                        status: "deleted",
+                        orderId: "ORD-MUNIT-003"
+                    }]'
+                    mediaType="application/java"/>
+            </munit-tools:then-return>
+
+        </munit-tools:mock-when>
+
+        <munit-tools:mock-when
+            doc:name="Mock DELETE Notification Email"
+            processor="email:send">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return/>
+
+        </munit-tools:mock-when>
+
+    </munit:behavior>
+
+    <munit:execution>
+
+        <munit:set-event doc:name="Set DELETE Queue Message">
+
+            <munit:payload
+                mediaType="application/json"
+                value='#[write({
+                    correlationId: "test-corr-003",
+                    operation: "DELETE",
+                    orderId: "ORD-MUNIT-003",
+                    payload: {
+                        customerId: "CUST-003",
+                        customerName: "Delete Customer",
+                        customerEmail: "delete.customer@example.com"
+                    }
+                }, "application/json")]'/>
+
+        </munit:set-event>
+
+        <flow-ref
+            name="order-process-queue-listener-flow"
+            doc:name="Invoke order-process-queue-listener-flow"/>
+
+    </munit:execution>
+
+    <munit:validation>
+
+        <munit-tools:assert-that
+            doc:name="Assert operation is DELETE"
+            expression="#[vars.operation]"
+            is="#[MunitTools::equalTo('DELETE')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert correlationId"
+            expression="#[vars.correlationId]"
+            is="#[MunitTools::equalTo('test-corr-003')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert orderId"
+            expression="#[vars.orderId]"
+            is="#[MunitTools::equalTo('ORD-MUNIT-003')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert rawMessage exists"
+            expression="#[vars.rawMessage != null]"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert customer email saved"
+            expression="#[vars.customerEmail]"
+            is="#[MunitTools::equalTo('delete.customer@example.com')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DELETE email subject"
+            expression="#[vars.emailSubject]"
+            is="#[MunitTools::equalTo('Order Cancellation - #ORD-MUNIT-003')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DELETE target email"
+            expression="#[vars.targetEmail]"
+            is="#[MunitTools::equalTo('delete.customer@example.com')]"/>
+
+        <munit-tools:verify-call
+            doc:name="Verify DB SAPI DELETE called once"
+            processor="http:request"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - DELETE /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify DELETE email called once"
+            processor="email:send"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+    </munit:validation>
+
+</munit:test>
+
+<!-- TEST CASE 4: Main Flow Invalid Operation Failure Path + Global Error Handler + DLQ Success -->
+
+<munit:test
+    name="order-process-queue-listener-flow-invalid-operation-dlq-success-test"
+    description="Verify invalid operation executes APP INVALID_OPERATION path, global error handler, and DLQ publish successfully">
+
+    <munit:behavior>
+
+        <munit-tools:mock-when
+            doc:name="Mock DLQ Publish Success"
+            processor="amqp:publish">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Publish Message to DLQ']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return/>
+
+        </munit-tools:mock-when>
+
+    </munit:behavior>
+
+    <munit:execution>
+
+        <munit:set-event doc:name="Set Invalid Operation Queue Message">
+
+            <munit:payload
+                mediaType="application/json"
+                value='#[write({
+                    correlationId: "test-corr-004",
+                    operation: "INVALID_OPERATION",
+                    orderId: "ORD-MUNIT-004",
+                    payload: {
+                        customerId: "CUST-004"
+                    }
+                }, "application/json")]'/>
+
+        </munit:set-event>
+
+        <flow-ref
+            name="order-process-queue-listener-flow"
+            doc:name="Invoke order-process-queue-listener-flow"/>
+
+    </munit:execution>
+
+    <munit:validation>
+
+        <munit-tools:assert-that
+            doc:name="Assert invalid operation retained"
+            expression="#[vars.operation]"
+            is="#[MunitTools::equalTo('INVALID_OPERATION')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert correlationId retained"
+            expression="#[vars.correlationId]"
+            is="#[MunitTools::equalTo('test-corr-004')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert orderId retained"
+            expression="#[vars.orderId]"
+            is="#[MunitTools::equalTo('ORD-MUNIT-004')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert rawMessage exists"
+            expression="#[vars.rawMessage != null]"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:verify-call
+            doc:name="Verify DLQ publish called once"
+            processor="amqp:publish"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Publish Message to DLQ']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify POST request not called"
+            processor="http:request"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - POST /orders']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify PATCH request not called"
+            processor="http:request"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - PATCH /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify DELETE request not called"
+            processor="http:request"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - DELETE /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify email not called"
+            processor="email:send"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+    </munit:validation>
+
+</munit:test>
+
+<!-- TEST CASE 5: CREATE Failure Path + HTTP:CONNECTIVITY Propagation -->
+
+<munit:test
+    name="order-process-queue-listener-flow-create-http-connectivity-error-test"
+    description="Verify CREATE HTTP CONNECTIVITY failure executes create-order-subflow error handler and global transient error handler"
+    expectedErrorType="HTTP:CONNECTIVITY">
+
+    <munit:behavior>
+
+        <munit-tools:mock-when
+            doc:name="Mock DB SAPI POST Connectivity Error"
+            processor="http:request">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - POST /orders']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return>
+                <munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+            </munit-tools:then-return>
+
+        </munit-tools:mock-when>
+
+    </munit:behavior>
+
+    <munit:execution>
+
+        <munit:set-event doc:name="Set CREATE Queue Message for Connectivity Error">
+
+            <munit:payload
+                mediaType="application/json"
+                value='#[write({
+                    correlationId: "test-corr-005",
+                    operation: "CREATE",
+                    orderId: "",
+                    payload: {
+                        customerId: "CUST-005",
+                        customerName: "Connectivity Test Customer",
+                        customerEmail: "connectivity@example.com",
+                        orderDate: "2026-10-11",
+                        productCode: "PROD-005",
+                        quantity: 1,
+                        currency: "USD",
+                        shippingAddressLine1: "500 Connectivity Street",
+                        shippingAddressLine2: null,
+                        shippingCity: "Hyderabad",
+                        shippingState: "Telangana",
+                        shippingPostalCode: "500019",
+                        shippingCountry: "India"
+                    }
+                }, "application/json")]'/>
+
+        </munit:set-event>
+
+        <flow-ref
+            name="order-process-queue-listener-flow"
+            doc:name="Invoke order-process-queue-listener-flow"/>
+
+    </munit:execution>
+
+</munit:test>
+
+<!-- TEST CASE 6: Global Error Handler DLQ Publish Failure Path -->
+
+<munit:test
+    name="order-process-queue-listener-flow-dlq-publish-failure-test"
+    description="Verify invalid operation enters global error handler and AMQP DLQ publish failure is consumed by Catch DLQ Publish Failure">
+
+    <munit:behavior>
+
+        <munit-tools:mock-when
+            doc:name="Mock DLQ Publish AMQP Connectivity Error"
+            processor="amqp:publish">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Publish Message to DLQ']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return>
+                <munit-tools:error typeId="AMQP:CONNECTIVITY"/>
+            </munit-tools:then-return>
+
+        </munit-tools:mock-when>
+
+    </munit:behavior>
+
+    <munit:execution>
+
+        <munit:set-event doc:name="Set Invalid Operation for DLQ Failure">
+
+            <munit:payload
+                mediaType="application/json"
+                value='#[write({
+                    correlationId: "test-corr-006",
+                    operation: "UNSUPPORTED_OPERATION",
+                    orderId: "ORD-MUNIT-006",
+                    payload: {
+                        customerId: "CUST-006"
+                    }
+                }, "application/json")]'/>
+
+        </munit:set-event>
+
+        <flow-ref
+            name="order-process-queue-listener-flow"
+            doc:name="Invoke order-process-queue-listener-flow"/>
+
+    </munit:execution>
+
+    <munit:validation>
+
+        <munit-tools:assert-that
+            doc:name="Assert operation retained"
+            expression="#[vars.operation]"
+            is="#[MunitTools::equalTo('UNSUPPORTED_OPERATION')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert correlationId retained"
+            expression="#[vars.correlationId]"
+            is="#[MunitTools::equalTo('test-corr-006')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert orderId retained"
+            expression="#[vars.orderId]"
+            is="#[MunitTools::equalTo('ORD-MUNIT-006')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert rawMessage exists"
+            expression="#[vars.rawMessage != null]"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DLQ payload exists after handled publish failure"
+            expression="#[payload != null]"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DLQ payload operation"
+            expression="#[payload.operation]"
+            is="#[MunitTools::equalTo('UNSUPPORTED_OPERATION')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DLQ payload correlationId"
+            expression="#[payload.correlationId]"
+            is="#[MunitTools::equalTo('test-corr-006')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DLQ payload orderId"
+            expression="#[payload.orderId]"
+            is="#[MunitTools::equalTo('ORD-MUNIT-006')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DLQ error code"
+            expression="#[payload.errorDetails.errorCode]"
+            is="#[MunitTools::equalTo('INVALID_OPERATION')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert DLQ error namespace"
+            expression="#[payload.errorDetails.errorNamespace]"
+            is="#[MunitTools::equalTo('APP')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert original operation in raw message"
+            expression="#[payload.originalPayload.operation]"
+            is="#[MunitTools::equalTo('UNSUPPORTED_OPERATION')]"/>
+
+        <munit-tools:verify-call
+            doc:name="Verify DLQ publish attempted once"
+            processor="amqp:publish"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Publish Message to DLQ']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify POST request not called"
+            processor="http:request"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - POST /orders']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify PATCH request not called"
+            processor="http:request"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - PATCH /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify DELETE request not called"
+            processor="http:request"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Call DB SAPI - DELETE /orders/{orderId}']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+        <munit-tools:verify-call
+            doc:name="Verify notification email not called"
+            processor="email:send"
+            times="0">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+    </munit:validation>
+
+</munit:test>
+<!-- TEST CASE 7: Email Send Failure Path + On Error Continue -->
+
+<munit:test
+    name="order-email-subflow-email-send-failure-test"
+    description="Verify email send connectivity failure is handled by the email subflow on-error-continue without propagating the error">
+
+    <munit:behavior>
+
+        <munit-tools:mock-when
+            doc:name="Mock Email Send Connectivity Error"
+            processor="email:send">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return>
+                <munit-tools:error typeId="EMAIL:CONNECTIVITY"/>
+            </munit-tools:then-return>
+
+        </munit-tools:mock-when>
+
+    </munit:behavior>
+
+    <munit:execution>
+
+        <munit:set-event doc:name="Set Email Failure Payload">
+
+            <munit:payload
+                mediaType="application/java"
+                value='#[{
+                    customerName: "Email Failure Customer",
+                    customerEmail: "email.failure@example.com",
+                    productCode: "PROD-007",
+                    quantity: 1,
+                    currency: "USD",
+                    shippingAddressLine1: "700 Email Street",
+                    shippingAddressLine2: null,
+                    shippingCity: "Hyderabad",
+                    shippingState: "Telangana",
+                    shippingPostalCode: "500019",
+                    shippingCountry: "India"
+                }]'/>
+
+        </munit:set-event>
+
+        <set-variable
+            doc:name="Set operation"
+            variableName="operation"
+            value="#['CREATE']"/>
+
+        <set-variable
+            doc:name="Set orderId"
+            variableName="orderId"
+            value="#['ORD-MUNIT-007']"/>
+
+        <set-variable
+            doc:name="Set correlationId"
+            variableName="correlationId"
+            value="#['test-corr-007']"/>
+
+        <set-variable
+            doc:name="Set customerEmail"
+            variableName="customerEmail"
+            value="#['email.failure@example.com']"/>
+
+        <set-variable
+            doc:name="Set orderPayload"
+            variableName="orderPayload"
+            value='#[{
+                customerName: "Email Failure Customer",
+                customerEmail: "email.failure@example.com",
+                productCode: "PROD-007",
+                quantity: 1,
+                currency: "USD",
+                shippingAddressLine1: "700 Email Street",
+                shippingAddressLine2: null,
+                shippingCity: "Hyderabad",
+                shippingState: "Telangana",
+                shippingPostalCode: "500019",
+                shippingCountry: "India"
+            }]'/>
+
+        <set-variable
+            doc:name="Set unitPrice"
+            variableName="unitPrice"
+            value="#[50]"/>
+
+        <set-variable
+            doc:name="Set calculatedTotal"
+            variableName="calculatedTotal"
+            value="#[50]"/>
+
+        <flow-ref
+            name="order-email-subflow"
+            doc:name="Invoke order-email-subflow"/>
+
+    </munit:execution>
+
+    <munit:validation>
+
+        <munit-tools:assert-that
+            doc:name="Assert email subject was prepared"
+            expression="#[vars.emailSubject]"
+            is="#[MunitTools::equalTo('Order Confirmation - #ORD-MUNIT-007')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert target email was prepared"
+            expression="#[vars.targetEmail]"
+            is="#[MunitTools::equalTo('email.failure@example.com')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert email content exists"
+            expression="#[payload != null]"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert email content contains order ID"
+            expression="#[(payload as String) contains 'ORD-MUNIT-007']"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:verify-call
+            doc:name="Verify email send attempted once"
+            processor="email:send"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Notification Email']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+    </munit:validation>
+
+</munit:test>
+<!-- TEST CASE 8: Failure Email Subflow Success Path -->
+
+<munit:test
+    name="order-failure-email-subflow-success-test"
+    description="Verify failure email metadata and body are created and customer failure email is sent successfully">
+
+    <munit:behavior>
+
+        <munit-tools:mock-when
+            doc:name="Mock Send Failure Email"
+            processor="email:send">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Failure Email']"/>
+            </munit-tools:with-attributes>
+
+            <munit-tools:then-return/>
+
+        </munit-tools:mock-when>
+
+    </munit:behavior>
+
+    <munit:execution>
+
+        <munit:set-event doc:name="Set Failure Email Payload">
+
+            <munit:payload
+                mediaType="application/java"
+                value='#[{
+                    customerName: "Failure Test Customer",
+                    customerEmail: "failure.customer@example.com"
+                }]'/>
+
+        </munit:set-event>
+
+        <set-variable
+            doc:name="Set customerEmail"
+            variableName="customerEmail"
+            value="#['failure.customer@example.com']"/>
+
+        <set-variable
+            doc:name="Set orderPayload"
+            variableName="orderPayload"
+            value='#[{
+                customerName: "Failure Test Customer",
+                customerEmail: "failure.customer@example.com"
+            }]'/>
+
+        <set-variable
+            doc:name="Set orderId"
+            variableName="orderId"
+            value="#['ORD-FAIL-008']"/>
+
+        <set-variable
+            doc:name="Set correlationId"
+            variableName="correlationId"
+            value="#['test-corr-008']"/>
+
+        <set-variable
+            doc:name="Set sapiErrorPayload"
+            variableName="sapiErrorPayload"
+            value='#[{
+                errorMessage: "Order creation failed in DB SAPI",
+                orderId: "ORD-FAIL-008"
+            }]'/>
+
+        <flow-ref
+            name="order-failure-email-subflow"
+            doc:name="Invoke order-failure-email-subflow"/>
+
+    </munit:execution>
+
+    <munit:validation>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure email recipient"
+            expression="#[vars.failureTargetEmail]"
+            is="#[MunitTools::equalTo('failure.customer@example.com')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure reason"
+            expression="#[vars.failureReason]"
+            is="#[MunitTools::equalTo('Order creation failed in DB SAPI')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure email subject"
+            expression="#[vars.failureEmailSubject]"
+            is="#[MunitTools::equalTo('Order Processing Failed - Correlation ID: test-corr-008')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure email body exists"
+            expression="#[vars.failureEmailBody != null]"
+            is="#[MunitTools::equalTo(true)]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure email body contains customer name"
+            expression="#[vars.failureEmailBody as String]"
+            is="#[MunitTools::containsString('Failure Test Customer')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure email body contains order ID"
+            expression="#[vars.failureEmailBody as String]"
+            is="#[MunitTools::containsString('ORD-FAIL-008')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure email body contains failure reason"
+            expression="#[vars.failureEmailBody as String]"
+            is="#[MunitTools::containsString('Order creation failed in DB SAPI')]"/>
+
+        <munit-tools:assert-that
+            doc:name="Assert failure email body contains correlation ID"
+            expression="#[vars.failureEmailBody as String]"
+            is="#[MunitTools::containsString('test-corr-008')]"/>
+
+        <munit-tools:verify-call
+            doc:name="Verify failure email sent once"
+            processor="email:send"
+            times="1">
+
+            <munit-tools:with-attributes>
+                <munit-tools:with-attribute
+                    attributeName="doc:name"
+                    whereValue="#['Send Failure Email']"/>
+            </munit-tools:with-attributes>
+
+        </munit-tools:verify-call>
+
+    </munit:validation>
+
+</munit:test>
+
+</mule>

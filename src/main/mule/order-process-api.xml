@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:validation="http://www.mulesoft.org/schema/mule/validation"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" 
+	xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns="http://www.mulesoft.org/schema/mule/core" 
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
+
+	<!-- Main RabbitMQ Queue Listener Flow -->
+	<flow name="order-process-queue-listener-flow" doc:id="b4534764-6194-4471-8383-97f4271f4923">
+		<amqp:listener doc:name="Listen to order.commands Queue" doc:id="5162269e-1a07-40e3-8a17-6b59337c5624" 
+			config-ref="AMQP_Config" 
+			queueName="${amqp.queue}" 
+			ackMode="AUTO" 
+			outputMimeType="application/json"/>
+		
+		<!-- Parse Queue Payload & Extract Context Variables -->
+		<ee:transform doc:name="Parse Payload &amp; Set Context Variables" doc:id="47640a41-459a-4358-9ec0-4bb9cf462fd3">
+	<ee:message>
+		<ee:set-payload><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/json
+var parsed = if (payload is String) (try(() -> read(payload, "application/json")).result default {}) else payload
+---
+parsed.payload default parsed]]></ee:set-payload>
+	</ee:message>
+	<ee:variables>
+		<ee:set-variable variableName="correlationId"><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/java
+var parsed = if (payload is String) (try(() -> read(payload, "application/json")).result default {}) else payload
+---
+(parsed.correlationId default correlationId) as String]]></ee:set-variable>
+		<ee:set-variable variableName="operation"><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/java
+var parsed = if (payload is String) (try(() -> read(payload, "application/json")).result default {}) else payload
+---
+upper(trim((parsed.operation default parsed.action default "CREATE") as String))]]></ee:set-variable>
+		<ee:set-variable variableName="orderId"><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/java
+var parsed = if (payload is String) (try(() -> read(payload, "application/json")).result default {}) else payload
+---
+(parsed.orderId default parsed.payload.orderId default "") as String]]></ee:set-variable>
+		<ee:set-variable variableName="rawMessage"><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/json
+var parsed = if (payload is String) (try(() -> read(payload, "application/json")).result default {}) else payload
+---
+parsed]]></ee:set-variable>
+	</ee:variables>
+</ee:transform>
+
+		<!-- Structured Execution Logging -->
+		<logger level="INFO" doc:name="Log Incoming Queue Event" doc:id="1792e5f2-f96f-4894-856c-130450ea2c98" 
+			message='#["[PAPI] Ingested Queue Command | Operation: " ++ (vars.operation default "UNKNOWN") ++ " | Order ID: " ++ (vars.orderId default "N/A") ++ " | Correlation ID: " ++ (vars.correlationId default "")]'/>
+
+		<!-- Operation Choice Router -->
+		<choice doc:name="Route Operation Command" doc:id="8fd19d42-98ca-4fd3-b770-2a65d5d163f2">
+			<when expression='#[vars.operation == "CREATE" or vars.operation == "CREATE_ORDER"]'>
+				<flow-ref doc:name="Invoke create-order-subflow" name="create-order-subflow"/>
+			</when>
+			<when expression='#[vars.operation == "UPDATE" or vars.operation == "UPDATE_ORDER"]'>
+				<flow-ref doc:name="Invoke update-order-subflow" name="update-order-subflow"/>
+			</when>
+			<when expression='#[vars.operation == "DELETE" or vars.operation == "DELETE_ORDER"]'>
+				<flow-ref doc:name="Invoke delete-order-subflow" name="delete-order-subflow"/>
+			</when>
+			<otherwise>
+				<logger level="WARN" doc:name="Log Invalid Operation Error" message='#["[PAPI] Unsupported or invalid operation received: " ++ (vars.operation default "NULL")]'/>
+				<raise-error doc:name="Raise APP:INVALID_OPERATION" type="APP:INVALID_OPERATION" description="#[&quot;Unsupported operation type: &quot; ++ (vars.operation default &quot;NULL&quot;)]"/>
+			</otherwise>
+		</choice>
+
+		<logger level="INFO" doc:name="Log Command Processing Completed" message='#["[PAPI] Successfully processed command | Operation: " ++ vars.operation ++ " | Correlation ID: " ++ vars.correlationId]'/>
+
+		<error-handler ref="global-error-handlerError_Handler" />
+	</flow>
+</mule>

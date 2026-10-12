@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+	xmlns:email="http://www.mulesoft.org/schema/mule/email"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd
+		http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd">
+
+	<!-- 1. Environment Properties -->
+	<global-property doc:name="Global Property" name="mule.env" value="dev" />
+	<global-property doc:name="Global Property" name="runtime.key" value="naveen123" />
+
+	<!-- 2. YAML Configuration File Paths -->
+	<configuration-properties doc:name="Configuration properties" file="config/config-dev.yaml" />
+
+	<secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" file="config/secure-dev.yaml" key="${runtime.key}">
+		<secure-properties:encrypt algorithm="Blowfish"/>
+	</secure-properties:config>
+
+	<!-- 3. Global Error Handler Reference -->
+	<configuration doc:name="Configuration" defaultErrorHandler-ref="global-error-handlerError_Handler" />
+
+	<!-- 4. AMQP Config -->
+	<amqp:config name="AMQP_Config" doc:name="AMQP Config">
+		<amqp:connection host="${amqp.host}" port="${amqp.port}" virtualHost="${amqp.virtualHost}" username="${amqp.username}" password="${secure::amqp.password}" useTls="true"/>
+	</amqp:config>
+
+	<!-- 5. HTTP Request Config -->
+	<http:request-config name="DB_SAPI_HTTP_Request_Config" doc:name="HTTP Request configuration" basePath="${dbsapi.basePath}">
+		<http:request-connection host="${dbsapi.host}" port="${dbsapi.port}">
+			<reconnection>
+				<reconnect count="3" frequency="3000" />
+			</reconnection>
+		</http:request-connection>
+	</http:request-config>
+
+	<!-- 6. Email SMTP Config (Fixed for Port 587 STARTTLS) -->
+	<email:smtp-config name="Email_SMTP_Config" doc:name="Email SMTP" doc:id="7b0bcc9b-c5eb-4521-86f5-1f103fcffcef">
+		<email:smtp-connection host="${email.host}" port="${email.port}" user="${email.user}" password="${secure::email.password}">
+			<email:properties>
+				<email:property key="mail.smtp.starttls.enable" value="true" />
+				<email:property key="mail.smtp.auth" value="true" />
+			</email:properties>
+		</email:smtp-connection>
+	</email:smtp-config>
+
+</mule>
