@@ -37,8 +37,3 @@ jobs:
         env:
           CONNECTED_APP_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
           CONNECTED_APP_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
-
-        with:
-          name: order-process-api-artifact
-          path: target/*-mule-application.jar
-          if-no-files-found: error
