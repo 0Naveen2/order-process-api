@@ -2,12 +2,20 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 
-	<groupId>com.mycompany</groupId>
+	<groupId>78f0de6c-2145-4f67-a668-6768c0d01c87</groupId>
 	<artifactId>order-process-api</artifactId>
 	<version>1.0.0-SNAPSHOT</version>
 	<packaging>mule-application</packaging>
 
 	<name>order-process-api</name>
+	<distributionManagement>
+    <repository>
+        <id>anypoint-exchange-v3</id>
+        <name>Corporate Repository</name>
+        <url>https://maven.anypoint.mulesoft.com/api/v3/organizations/${project.groupId}/maven</url>
+        <layout>default</layout>
+    </repository>
+	</distributionManagement>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -26,11 +34,38 @@
 				<version>3.2.0</version>
 			</plugin>
 			<plugin>
-				<groupId>org.mule.tools.maven</groupId>
-				<artifactId>mule-maven-plugin</artifactId>
-				<version>${mule.maven.plugin.version}</version>
-				<extensions>true</extensions>
-			</plugin>
+    <groupId>org.mule.tools.maven</groupId>
+    <artifactId>mule-maven-plugin</artifactId>
+    <version>${mule.maven.plugin.version}</version>
+    <extensions>true</extensions>
+
+    <configuration>
+        <cloudhub2Deployment>
+            <uri>https://anypoint.mulesoft.com</uri>
+            <provider>MC</provider>
+
+            <environment>${anypoint.environment}</environment>
+            <target>${anypoint.target}</target>
+            <muleVersion>${muleVersion}</muleVersion>
+
+            <connectedAppClientId>${env.CONNECTED_APP_CLIENT_ID}</connectedAppClientId>
+            <connectedAppClientSecret>${env.CONNECTED_APP_CLIENT_SECRET}</connectedAppClientSecret>
+            <connectedAppGrantType>client_credentials</connectedAppGrantType>
+
+            <applicationName>${anypoint.appName}</applicationName>
+            <businessGroupId>${anypoint.orgId}</businessGroupId>
+
+            <replicas>1</replicas>
+            <vCores>0.1</vCores>
+            <skipDeploymentVerification>false</skipDeploymentVerification>
+
+            <properties>
+                <secure.key>${secure.key}</secure.key>
+                <env>${anypoint.environment}</env>
+            </properties>
+        </cloudhub2Deployment>
+    </configuration>
+</plugin>
 			<plugin>
 				<groupId>com.mulesoft.munit.tools</groupId>
 				<artifactId>munit-maven-plugin</artifactId>
