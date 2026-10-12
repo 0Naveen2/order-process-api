@@ -36,7 +36,7 @@
 
 	<!-- 5. HTTP Request Config -->
 	<http:request-config name="DB_SAPI_HTTP_Request_Config" doc:name="HTTP Request configuration" basePath="${dbsapi.basePath}">
-		<http:request-connection host="${dbsapi.host}" port="${dbsapi.port}">
+		<http:request-connection host="${dbsapi.host}" port="${dbsapi.port}" protocol="HTTPS">
 			<reconnection>
 				<reconnect count="3" frequency="3000" />
 			</reconnection>
