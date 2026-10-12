@@ -975,7 +975,7 @@ http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/mu
         <munit-tools:assert-that
             doc:name="Assert email content contains order ID"
             expression="#[(payload as String) contains 'ORD-MUNIT-007']"
-            is="#[MunitTools::equalTo(true)]"/>
+            is="#[MunitTools::equalTo('true')]"/>
 
         <munit-tools:verify-call
             doc:name="Verify email send attempted once"
@@ -1087,7 +1087,7 @@ http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/mu
         <munit-tools:assert-that
             doc:name="Assert failure email body exists"
             expression="#[vars.failureEmailBody != null]"
-            is="#[MunitTools::equalTo(true)]"/>
+            is="#[MunitTools::equalTo('true')]"/>
 
         <munit-tools:assert-that
             doc:name="Assert failure email body contains customer name"
